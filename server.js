@@ -3,7 +3,9 @@ var fs = require('fs')
 var path = require('path')
 var certsPath = path.join(__dirname, 'certs', 'server')
 var caCertsPath = path.join(__dirname, 'certs', 'ca')
-var targetDeviceId = process.argv[2] || 1
+
+var fileSent
+var targetDeviceId = process.argv[2] || 1 // for testing
 var targetFile = process.argv[3] || 'exec.sh'
 
 var options = {
@@ -20,35 +22,37 @@ var options = {
   rejectUnauthorized: true,
 }
 
-process.on('SIGINT', function() { console.log('quitting'); process.exit() })
-process.on('SIGTERM', function() { console.log('terminating'); process.exit() })
-
 var server = https.createServer(options, function (req, res) {
-  var timestamp = new Date().toISOString()
-  var clientCert = req.connection.getPeerCertificate()
   var deviceId = req.headers['device-id']
-  var remoteVersionString = req.headers['application-version']
-  var ipAddress = req.connection.remoteAddress
-
-  // console.log('%s | %s | %s | %s | %s | %s', timestamp, remoteVersionString, deviceId, countryCode, country, ipAddress)
   var filename = path.join(__dirname, targetFile)
   // console.log('DeviceId: %s | File: %s', deviceId, filename)
 
   if (deviceId == targetDeviceId) {
-    fs.readFile(filename, "binary", function(err, file) {
-      if(err) {
-        res.writeHead(500, {"Content-Type": "text/plain"})
-        res.write(err + "\n")
-        res.end()
-        return
-      } else {
-        res.writeHead(200)
-        res.end(file, 'binary', function() {
-          // console.log('File sent succesfully')
-          process.exit()
-        })
-      }
-    })
+    if (!fileSent && req.method === 'GET') {
+      fs.readFile(filename, "binary", function (err, file) {
+        if (err) {
+          res.writeHead(500, { "Content-Type": "text/plain" })
+          res.write(err + "\n")
+          res.end()
+          console.log('Can\'t read ' + filename);
+          return;
+        } else {
+          res.writeHead(200)
+          res.end(file, 'binary', function () {
+            console.log('File sent succesfully')
+            fileSent = true;
+          })
+        }
+      })
+    }
+
+    if (fileSent && req.method === 'POST') {
+      req.pipe(process.stdout);
+      req.on('end', function () {
+        process.exit(0);
+      })
+      res.end()
+    }
   } else {
     res.writeHead(304, {'content-type': 'text/plain'});
     res.end('Up to date\n');
